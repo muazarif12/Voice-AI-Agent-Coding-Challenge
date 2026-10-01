@@ -105,13 +105,4 @@ failure.
 Each call that saves a record stores its full transcript in `call_transcripts`, linked to
 the patient. Every turn and the final record are also logged to stdout (`fly logs`).
 
-## Known limitations
 
-- **No API authentication.** Anyone with the URL can read and change records.
-- **Patient data appears in the logs**, as the brief requires. Production would need
-  restricted log access.
-- **One machine with SQLite.** Simple, but it doesn't scale out. Use Postgres to run more
-  machines.
-- **US only.** Phone numbers, states and ZIP codes are validated as US formats.
-- **Local `dev` mode shares the phone number.** Running `app.worker dev` while the Fly app
-  is up means calls may go to either one.
