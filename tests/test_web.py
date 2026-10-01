@@ -36,6 +36,13 @@ def test_health(client):
     assert client.get("/health").json() == {"data": {"status": "up"}, "error": None}
 
 
+def test_dashboard_page_is_served(client):
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "Registered Patients" in resp.text
+
+
 def test_readyz(client):
     assert client.get("/readyz").json()["data"] == {"status": "ready"}
 

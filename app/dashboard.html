@@ -1,0 +1,123 @@
+<!doctype html>
+<!-- Read-only dashboard of registered patients, served at "/dashboard" by app/web.py.
+     It only calls the public API (GET /patients and GET /patients/{id}/transcripts). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patient Intake Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; background: #f6f7f9; color: #1f2328; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .muted { color: #656d76; font-size: 14px; }
+  .bar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
+  input, button { font: inherit; padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 6px; }
+  button { background: #fff; cursor: pointer; }
+  button:hover { background: #f0f2f4; }
+  .table-wrap { overflow-x: auto; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eaeef2; white-space: nowrap; }
+  th { background: #f6f8fa; }
+  dialog { max-width: 640px; width: 90%; border: 1px solid #d0d7de; border-radius: 8px; }
+  .turn { margin: 6px 0; }
+  .agent { color: #0550ae; }
+  .caller { color: #1a7f37; }
+  .error { color: #cf222e; }
+</style>
+</head>
+<body>
+  <h1>Registered Patients</h1>
+  <div class="muted">Call +1 (484) 317-4139 to register. Refreshes every 15 seconds.</div>
+
+  <div class="bar">
+    <input id="search" placeholder="Filter by last name">
+    <button onclick="loadPatients()">Search</button>
+    <button onclick="document.getElementById('search').value=''; loadPatients()">Clear</button>
+  </div>
+
+  <div id="status" class="muted"></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Date of birth</th><th>Sex</th><th>Phone</th><th>Address</th>
+          <th>Insurance</th><th>Language</th><th>Registered</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <dialog id="transcript">
+    <h3 id="transcript-title"></h3>
+    <div id="transcript-body"></div>
+    <p><button onclick="document.getElementById('transcript').close()">Close</button></p>
+  </dialog>
+
+<script>
+  // Everything from the database is escaped before it goes into the page.
+  function esc(value) {
+    return String(value ?? "").replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function phone(p) {
+    return p ? `(${p.slice(0, 3)}) ${p.slice(3, 6)}-${p.slice(6)}` : "";
+  }
+
+  async function loadPatients() {
+    const lastName = document.getElementById("search").value.trim();
+    const url = "/patients" + (lastName ? "?last_name=" + encodeURIComponent(lastName) : "");
+    const status = document.getElementById("status");
+    try {
+      const body = await (await fetch(url)).json();
+      if (body.error) throw new Error(body.error.message);
+      const patients = body.data;
+      status.textContent = `${patients.length} patient(s)`;
+      status.className = "muted";
+      document.getElementById("rows").innerHTML = patients.map(p => `
+        <tr>
+          <td>${esc(p.first_name)} ${esc(p.last_name)}</td>
+          <td>${esc(p.date_of_birth)}</td>
+          <td>${esc(p.sex)}</td>
+          <td>${esc(phone(p.phone_number))}</td>
+          <td>${esc([p.address_line_1, p.address_line_2, p.city, `${p.state} ${p.zip_code}`]
+                 .filter(Boolean).join(", "))}</td>
+          <td>${esc(p.insurance_provider ?? "")}</td>
+          <td>${esc(p.preferred_language)}</td>
+          <td>${esc(new Date(p.created_at).toLocaleString())}</td>
+          <td><button data-id="${esc(p.patient_id)}"
+                data-name="${esc(p.first_name)} ${esc(p.last_name)}">Transcript</button></td>
+        </tr>`).join("");
+    } catch (err) {
+      status.textContent = "Could not load patients: " + err.message;
+      status.className = "error";
+    }
+  }
+
+  async function showTranscripts(patientId, name) {
+    const body = await (await fetch(`/patients/${encodeURIComponent(patientId)}/transcripts`)).json();
+    const transcripts = body.data ?? [];
+    document.getElementById("transcript-title").textContent = `Calls with ${name}`;
+    document.getElementById("transcript-body").innerHTML = transcripts.length
+      ? transcripts.map(t => `
+          <p class="muted">${esc(new Date(t.created_at).toLocaleString())}</p>
+          ${t.turns.map(turn => `<div class="turn"><b class="${esc(turn.speaker)}">
+            ${turn.speaker === "agent" ? "Agent" : "Caller"}:</b> ${esc(turn.text)}</div>`).join("")}`
+        ).join("<hr>")
+      : '<p class="muted">No call transcripts for this patient (e.g. added via the API).</p>';
+    document.getElementById("transcript").showModal();
+  }
+
+  // One click handler for all Transcript buttons. The id and name travel in data attributes
+  // rather than inline JavaScript, so a name like O'Brien can't break the page.
+  document.getElementById("rows").addEventListener("click", event => {
+    const button = event.target.closest("button[data-id]");
+    if (button) showTranscripts(button.dataset.id, button.dataset.name);
+  });
+
+  loadPatients();
+  setInterval(loadPatients, 15000);
+</script>
+</body>
+</html>

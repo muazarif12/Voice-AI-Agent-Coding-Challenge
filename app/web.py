@@ -19,11 +19,12 @@ import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from prometheus_client import Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -143,6 +144,13 @@ def _find_patient(store: PatientStore, patient_id: str) -> PatientRow:
 
 
 # --- Endpoints -------------------------------------------------------------
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """Read-only web page listing registered patients. It's a single static file that calls
+    the JSON endpoints below from the browser."""
+    return FileResponse(Path(__file__).with_name("dashboard.html"))
 
 
 @app.get("/health")

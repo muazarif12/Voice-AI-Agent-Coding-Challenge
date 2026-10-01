@@ -3,6 +3,7 @@
 Call **+1 (484) 317-4139**. An AI agent collects your registration details, reads them
 back, saves them, and hangs up.
 
+- **Dashboard:** https://patient-intake-voice.fly.dev/dashboard
 - **API:** https://patient-intake-voice.fly.dev/patients
 - **API docs:** https://patient-intake-voice.fly.dev/docs
 
@@ -22,6 +23,7 @@ The voice worker and the API run in one container on Fly.io and share one databa
 | `app/schema.py` | Validation rules, shared by the agent and the API |
 | `app/store.py` | Database tables (`patients`, `call_transcripts`) |
 | `app/web.py` | REST API |
+| `app/dashboard.html` | Web page listing patients and their call transcripts |
 
 ## The conversation
 
