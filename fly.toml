@@ -1,0 +1,41 @@
+# Fly.io config. One always-on machine runs both the voice worker and the REST API
+# (see start.sh), sharing a SQLite database on a persistent volume.
+app = "patient-intake-voice"  # must be unique on Fly; change it if the name is taken
+primary_region = "iad"        # US East, close to the LiveKit project's US region
+
+[build]  # builds the Dockerfile in this folder
+
+[env]
+  # The database lives on the volume below, so it survives restarts and redeploys.
+  INTAKE_DB_URL = "sqlite:////data/records.db"
+
+[mounts]
+  source = "intake_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Never stop the machine when the API is idle: the voice worker must stay connected to
+  # LiveKit to answer calls, and phone calls don't arrive as HTTP traffic that would wake it.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+
+# Restart whenever start.sh exits, i.e. if either the API or the worker stops.
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  # The worker runs speech models locally (voice activity, turn detection, noise
+  # cancellation), so it needs more than the smallest machine.
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2

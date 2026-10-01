@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patient-intake-voice"
+version = "0.1.0"
+description = "Telephone voice agent that registers patient demographics through a staged conversation, backed by a small REST service."
+requires-python = ">=3.10,<3.15"
+
+dependencies = [
+    "livekit-agents[silero,turn-detector]~=1.5",
+    "livekit-plugins-ai-coustics~=0.2",
+    "python-dotenv",
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "email-validator",
+    "phonenumbers",
+    # Postgres driver — only used if INTAKE_DB_URL points at Postgres; SQLite is the
+    # default (see app/store.py).
+    "psycopg[binary]",
+    # Request-count/latency/status metrics for the API's /metrics endpoint (app/web.py).
+    "prometheus-fastapi-instrumentator",
+    # Used directly (not just via the instrumentator above) by app/web.py's
+    # patient_records_total gauge.
+    "prometheus-client",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Depends()/Query() in argument defaults is the idiomatic FastAPI pattern.
+"app/web.py" = ["B008"]

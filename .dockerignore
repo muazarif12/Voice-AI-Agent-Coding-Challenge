@@ -1,0 +1,22 @@
+# Secrets: must never end up in the image. On Fly they come from `fly secrets`.
+.env*
+
+# Local databases: contain patient data.
+*.db
+*.sqlite
+*.sqlite3
+
+# Host virtualenv (a Windows .venv would clobber the Linux one built in the image) and caches.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Not needed at runtime.
+.git/
+.vscode/
+.idea/
+tests/
+*.md
