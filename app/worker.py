@@ -47,7 +47,11 @@ VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
 
 # The worker makes an outbound connection to LiveKit Cloud and waits for calls; it serves no
 # public traffic. (It still runs a small internal health server on port 8081.)
-server = AgentServer()
+server = AgentServer(
+    # Each pre-started call process holds ~400 MB. One is enough for this app and keeps the
+    # 2 GB Fly machine (fly.toml) from running out of memory when a call starts.
+    num_idle_processes=1,
+)
 
 
 def _load_models(proc: JobProcess) -> None:
