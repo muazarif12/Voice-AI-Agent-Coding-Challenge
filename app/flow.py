@@ -72,6 +72,9 @@ class IntakeState:
     # save creates a new record, so someone sharing a family phone never overwrites another
     # person's record.
     updating: bool = False
+    # Set once save_record succeeds. When the call ends, the worker saves the call transcript
+    # linked to this patient (app/worker.py).
+    saved_patient_id: uuid.UUID | None = None
 
     def collected(self) -> dict:
         """Non-empty patient fields, keyed as the schema/store expect them."""
@@ -545,6 +548,7 @@ class ReviewStage(IntakeStage):
             await self._say_and_hang_up(SAVE_FAILED_MESSAGE)
             return None
 
+        state.saved_patient_id = row.patient_id
         log.info(
             f"patient record {action}",
             extra={"patient_id": str(row.patient_id), "action": action, "patient": payload},

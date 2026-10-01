@@ -1,8 +1,9 @@
-"""Load two demo patients into an empty database.
+"""Load two demo patients into the database.
 
     uv run python -m app.seed
 
-Does nothing if the database already holds patients, so it's safe to run more than once.
+A demo patient is skipped if a patient with the same phone number already exists, so it's
+safe to run more than once.
 Records go through the same NewPatient validation as the API. The phone numbers use the
 reserved 555-01xx range, so they don't belong to anyone.
 """
@@ -46,16 +47,18 @@ DEMO_PATIENTS = (
 
 
 def seed() -> int:
-    """Insert the demo patients if there are none yet. Returns how many were added."""
+    """Insert any demo patients not already on file. Returns how many were added."""
     create_schema()
+    added = 0
     with PatientStore.open() as store:
-        if store.count() > 0:
-            return 0
         for patient in DEMO_PATIENTS:
-            store.add(NewPatient(**patient))
-    return len(DEMO_PATIENTS)
+            record = NewPatient(**patient)
+            if store.find_by_phone(record.phone_number) is None:
+                store.add(record)
+                added += 1
+    return added
 
 
 if __name__ == "__main__":
     added = seed()
-    print(f"Added {added} demo patients." if added else "Database already has patients; skipped.")
+    print(f"Added {added} demo patient(s).")

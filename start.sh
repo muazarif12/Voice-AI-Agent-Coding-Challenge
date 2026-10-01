@@ -5,7 +5,8 @@
 # On shutdown (Fly sends SIGINT), pass the signal on so both processes stop cleanly.
 trap 'kill -TERM "$API_PID" "$WORKER_PID" 2>/dev/null' INT TERM
 
-uvicorn app.web:app --host 0.0.0.0 --port 8000 &
+# --no-access-log: the API logs every request itself, with a request id (app/obs.py).
+uvicorn app.web:app --host 0.0.0.0 --port 8000 --no-access-log &
 API_PID=$!
 python -m app.worker start &
 WORKER_PID=$!

@@ -36,7 +36,13 @@ from app.schema import (
     parse_birth_date,
     to_national_phone,
 )
-from app.store import PatientRow, PatientStore, as_public_dict, create_schema
+from app.store import (
+    PatientRow,
+    PatientStore,
+    as_public_dict,
+    as_transcript_dict,
+    create_schema,
+)
 
 configure_logging()
 log = logging.getLogger("api")
@@ -190,6 +196,13 @@ def list_patients(
 @app.get("/patients/{patient_id}")
 def read_patient(patient_id: str, store: PatientStore = Depends(store_dependency)) -> dict:
     return _envelope(as_public_dict(_find_patient(store, patient_id)))
+
+
+@app.get("/patients/{patient_id}/transcripts")
+def list_transcripts(patient_id: str, store: PatientStore = Depends(store_dependency)) -> dict:
+    """Transcripts of the phone calls that registered or updated this patient, newest first."""
+    row = _find_patient(store, patient_id)
+    return _envelope([as_transcript_dict(t) for t in store.transcripts_for(row.patient_id)])
 
 
 @app.post("/patients", status_code=status.HTTP_201_CREATED)

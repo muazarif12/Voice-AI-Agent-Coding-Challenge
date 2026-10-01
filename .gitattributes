@@ -1,0 +1,2 @@
+# start.sh runs inside the Linux container; Windows (CRLF) line endings would break it.
+*.sh text eol=lf

@@ -49,6 +49,16 @@ CREATE TABLE IF NOT EXISTS patients (
 -- SQLAlchemy's own default index-naming convention for index=True on this column.
 CREATE INDEX IF NOT EXISTS ix_patients_phone_number ON patients (phone_number);
 
+-- One row per phone call that registered or updated a patient (see app/worker.py).
+CREATE TABLE IF NOT EXISTS call_transcripts (
+    transcript_id UUID          PRIMARY KEY,       -- generated app-side (uuid4)
+    patient_id    UUID          NOT NULL REFERENCES patients (patient_id),
+    room_name     VARCHAR(255)  NOT NULL,          -- LiveKit room; also tags that call's logs
+    turns         JSON          NOT NULL,          -- [{"speaker": "agent"|"caller", "text": ...}]
+    created_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_call_transcripts_patient_id ON call_transcripts (patient_id);
+
 -- Optional, for parity with the ORM's onupdate=func.now() on `updated_at`: SQLAlchemy already
 -- sets updated_at correctly whenever the app itself does an UPDATE (it issues now() as part of
 -- that statement), so this trigger only matters if someone updates a row directly in psql

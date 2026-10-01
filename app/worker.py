@@ -25,7 +25,7 @@ from livekit.plugins import ai_coustics, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from app.flow import IntakeState, WelcomeStage
-from app.store import create_schema
+from app.store import PatientStore, create_schema
 
 # Load credentials from the .env.local next to the project root, regardless of the
 # directory the worker is launched from. On Fly.io there is no such file; the same variables
@@ -45,11 +45,14 @@ BRAIN = "openai/gpt-4.1"
 VOICE_MODEL = "cartesia/sonic-3"
 VOICE_ID = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
 
+# Chat roles mapped to the labels used in stored transcripts.
+_SPEAKERS = {"assistant": "agent", "user": "caller"}
+
 # The worker makes an outbound connection to LiveKit Cloud and waits for calls; it serves no
 # public traffic. (It still runs a small internal health server on port 8081.)
 server = AgentServer(
-    # Each pre-started call process holds ~400 MB. One is enough for this app and keeps the
-    # 2 GB Fly machine (fly.toml) from running out of memory when a call starts.
+    # Keep one call process pre-started (the default scales with CPU count). One is enough for
+    # this app and leaves more memory free on the 2 GB Fly machine (fly.toml).
     num_idle_processes=1,
 )
 
@@ -83,13 +86,37 @@ async def handle_call(ctx: JobContext) -> None:
         preemptive_generation=True,
     )
 
-    # Conversation log: every caller and agent turn goes to stdout. The final collected
-    # record is logged separately by save_record (app/flow.py).
+    # Every caller and agent turn is logged to stdout as it happens and collected here, so the
+    # whole conversation can be saved as the call's transcript once it ends. The final
+    # collected record is logged separately by save_record (app/flow.py).
+    turns: list[dict] = []
+
     @session.on("conversation_item_added")
-    def _log_turn(event: ConversationItemAddedEvent) -> None:
+    def _record_turn(event: ConversationItemAddedEvent) -> None:
         item = event.item
-        if isinstance(item, ChatMessage) and item.text_content:
-            log.info("conversation turn", extra={"role": item.role, "text": item.text_content})
+        if not (isinstance(item, ChatMessage) and item.text_content):
+            return  # skip tool calls and other non-speech items
+        speaker = _SPEAKERS.get(item.role)
+        if speaker is None:
+            return  # skip system/developer prompts
+        turns.append({"speaker": speaker, "text": item.text_content})
+        log.info("conversation turn", extra={"speaker": speaker, "text": item.text_content})
+
+    # Runs however the call ends (the agent hangs up after saving, or the caller hangs up).
+    # A transcript is only stored when a patient record was saved, since that's what it's
+    # linked to; any other call is still in the logs.
+    async def _save_transcript() -> None:
+        patient_id = session.userdata.saved_patient_id
+        if patient_id is None or not turns:
+            return
+        try:
+            with PatientStore.open() as store:
+                store.add_transcript(patient_id, ctx.room.name, turns)
+            log.info("call transcript saved", extra={"patient_id": str(patient_id)})
+        except Exception:
+            log.exception("saving call transcript failed", extra={"patient_id": str(patient_id)})
+
+    ctx.add_shutdown_callback(_save_transcript)
 
     await ctx.connect()
 

@@ -23,6 +23,9 @@ from starlette.responses import Response
 
 _request_id: ContextVar[str | None] = ContextVar("_request_id", default=None)
 
+# Successful requests to these paths are logged at DEBUG instead of INFO (see dispatch).
+_QUIET_PATHS = frozenset({"/health"})
+
 _RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", None, None).__dict__.keys()) | {
     "message",
     "asctime",
@@ -100,7 +103,11 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             raise
         else:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            self._log.info(
+            # Fly calls /health every 30 seconds; logging each success would bury the call
+            # logs. A failing health check is still logged.
+            quiet = request.url.path in _QUIET_PATHS and response.status_code < 400
+            log = self._log.debug if quiet else self._log.info
+            log(
                 "request handled",
                 extra={
                     "method": request.method,

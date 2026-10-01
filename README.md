@@ -4,6 +4,9 @@ Call **+1 (484) 317-4139**. A voice agent answers, collects your registration de
 reads them back for confirmation, saves them to a database, and hangs up. A REST API lets
 you view and manage the saved records.
 
+- **Live API:** https://patient-intake-voice.fly.dev/patients
+- **API docs:** https://patient-intake-voice.fly.dev/docs
+
 ## How it works
 
 ```
@@ -20,7 +23,7 @@ The voice worker and the API run side by side in one container and share one dat
 | `app/worker.py` | Connects to LiveKit, answers calls, sets up the voice pipeline |
 | `app/flow.py` | The conversation: Welcome → Identity → Contact → Extras → Review |
 | `app/schema.py` | Validation rules, shared by the voice agent and the API |
-| `app/store.py` | Database table and queries |
+| `app/store.py` | Database tables (`patients`, `call_transcripts`) and queries |
 | `app/web.py` | REST API |
 | `app/seed.py` | Adds two demo patients to an empty database |
 
@@ -87,15 +90,20 @@ failure. Interactive docs: `/docs`.
 | POST | `/patients` | Create a patient (201) |
 | PUT | `/patients/{id}` | Update only the fields you send |
 | DELETE | `/patients/{id}` | Soft delete (sets `deleted_at`) |
+| GET | `/patients/{id}/transcripts` | Transcripts of the calls that registered or updated this patient |
 
 ```bash
-curl "https://<your-app>.fly.dev/patients?last_name=doe"
+curl "https://patient-intake-voice.fly.dev/patients?last_name=doe"
 ```
 
-## Logs
+## Transcripts and logs
 
-Every caller and agent turn is logged, plus the full record when it is saved. If a save
-fails, that log line still holds what the caller said. View them with `fly logs`.
+When a call saves a patient record, the full conversation is stored in the
+`call_transcripts` table, linked to that patient. Read it with
+`GET /patients/{id}/transcripts`.
+
+Every turn is also logged to stdout, plus the full record when it is saved. If a save
+fails, that log line still holds what the caller said. View logs with `fly logs`.
 
 ## Known limitations and trade-offs
 

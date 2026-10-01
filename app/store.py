@@ -14,9 +14,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     Date,
     DateTime,
+    ForeignKey,
     String,
     Uuid,
     create_engine,
@@ -125,6 +127,25 @@ class PatientRow(ORMBase):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CallTranscriptRow(ORMBase):
+    """The transcript of one phone call, linked to the patient it registered or updated.
+    A patient who calls more than once has one row per call."""
+
+    __tablename__ = "call_transcripts"
+
+    transcript_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("patients.patient_id"), nullable=False, index=True
+    )
+    # The LiveKit room the call ran in; the same value tags that call's server logs.
+    room_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Ordered list of turns: [{"speaker": "agent" | "caller", "text": "..."}, ...]
+    turns: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 def create_schema() -> None:
     """Create tables if they do not yet exist. Safe to call on every startup."""
     ORMBase.metadata.create_all(_engine)
@@ -141,6 +162,17 @@ def _utc_iso(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat()
+
+
+def as_transcript_dict(row: CallTranscriptRow) -> dict:
+    """Serialize a transcript row to the JSON shape the API returns."""
+    return {
+        "transcript_id": str(row.transcript_id),
+        "patient_id": str(row.patient_id),
+        "room_name": row.room_name,
+        "created_at": _utc_iso(row.created_at),
+        "turns": row.turns,
+    }
 
 
 def as_public_dict(row: PatientRow) -> dict:
@@ -234,10 +266,28 @@ class PatientStore:
         stmt = select(func.count()).select_from(PatientRow).where(PatientRow.deleted_at.is_(None))
         return self._session.scalar(stmt) or 0
 
+    def transcripts_for(self, patient_id: uuid.UUID) -> list[CallTranscriptRow]:
+        """All call transcripts for a patient, newest first."""
+        stmt = (
+            select(CallTranscriptRow)
+            .where(CallTranscriptRow.patient_id == patient_id)
+            .order_by(CallTranscriptRow.created_at.desc())
+        )
+        return list(self._session.scalars(stmt).all())
+
     # -- writes -------------------------------------------------------------
 
     def add(self, data: NewPatient) -> PatientRow:
         row = PatientRow(**data.model_dump())
+        self._session.add(row)
+        self._session.commit()
+        self._session.refresh(row)
+        return row
+
+    def add_transcript(
+        self, patient_id: uuid.UUID, room_name: str, turns: list[dict]
+    ) -> CallTranscriptRow:
+        row = CallTranscriptRow(patient_id=patient_id, room_name=room_name, turns=turns)
         self._session.add(row)
         self._session.commit()
         self._session.refresh(row)

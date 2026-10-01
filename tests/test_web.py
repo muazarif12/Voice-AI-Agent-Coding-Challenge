@@ -5,6 +5,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from app.store import PatientStore
 from app.web import app, store_dependency
 
 NEW_PATIENT = dict(
@@ -160,3 +161,23 @@ def test_unexpected_error_is_500_in_envelope():
     assert resp.status_code == 500
     # The internal error text must not leak to the client.
     assert resp.json() == {"data": None, "error": {"message": "Internal server error"}}
+
+
+def test_transcripts_are_linked_to_the_patient(client):
+    pid = _create(client)["patient_id"]
+    assert client.get(f"/patients/{pid}/transcripts").json()["data"] == []
+
+    turns = [
+        {"speaker": "agent", "text": "Hello, are you ready to begin?"},
+        {"speaker": "caller", "text": "Yes."},
+    ]
+    with PatientStore.open() as store:  # what the worker does when a call ends
+        store.add_transcript(uuid.UUID(pid), "call-room-1", turns)
+
+    transcripts = client.get(f"/patients/{pid}/transcripts").json()["data"]
+    assert len(transcripts) == 1
+    assert transcripts[0]["patient_id"] == pid
+    assert transcripts[0]["room_name"] == "call-room-1"
+    assert transcripts[0]["turns"] == turns
+
+    assert client.get(f"/patients/{uuid.uuid4()}/transcripts").status_code == 404
