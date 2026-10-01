@@ -10,6 +10,15 @@ Stage order:  Welcome -> Identity -> Contact -> Extras -> Review
 Every value the caller gives goes through the same validation the REST API uses
 (``_validate`` runs it through ``app.schema.PatientChanges``). A record saved by phone is
 therefore held to exactly the same rules as one created with ``POST /patients``.
+
+Prompt design:
+- Each stage's ``instructions`` is its system prompt: a few sentences about its own job only.
+  Every stage also gets ``_SHARED_RULES`` (corrections and starting over work anywhere).
+- The LLM never writes data directly. It calls tools, and the tools validate; a rejected
+  value comes back as ``{"reprompt": {field: reason}}`` so the agent re-asks just that field.
+- Prompts forbid claiming something was saved or changed unless the tool call succeeded.
+- What must be exact is spoken by code, not the LLM: the readback (``_spoken_lines``) and
+  the final "You're all set" / error lines.
 """
 
 from __future__ import annotations
@@ -17,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date
 
 from livekit.agents import Agent, RunContext, function_tool
@@ -39,6 +48,15 @@ log = logging.getLogger("intake.flow")
 SAVE_FAILED_MESSAGE = (
     "I'm sorry, I ran into a technical problem and couldn't save your registration. "
     "Please call us back a little later. Goodbye."
+)
+
+# Appended to every stage's prompt (see IntakeStage), so a caller can fix an earlier answer or
+# start over at any point in the call, not only at the final review.
+_SHARED_RULES = (
+    "At any point in the call: if the caller corrects something they told you earlier (for "
+    'example "actually my last name is spelled D-A-V-I-S"), call amend with only the corrected '
+    "fields and briefly confirm the change. If they clearly ask to start over, call start_over. "
+    "Never say a detail was recorded or changed unless the tool call succeeded."
 )
 
 # --- Shared session state --------------------------------------------------
@@ -87,6 +105,11 @@ class IntakeState:
     def apply(self, values: dict) -> None:
         for field, value in values.items():
             setattr(self, field, value)
+
+    def reset(self) -> None:
+        """Back to a blank intake (used by start_over)."""
+        for field in fields(self):
+            setattr(self, field.name, field.default)
 
     def as_log_payload(self) -> dict:
         """collected(), with the date of birth as a string so it logs cleanly as JSON."""
@@ -174,7 +197,11 @@ def _spoken_lines(state: IntakeState) -> list[str]:
 
 
 class IntakeStage(Agent):
-    """Common helpers for reading and updating the shared state from within a stage."""
+    """Base for every stage: shared state access, plus the amend and start_over tools, which
+    are available in every stage."""
+
+    def __init__(self, *, instructions: str, **kwargs) -> None:
+        super().__init__(instructions=f"{instructions}\n\n{_SHARED_RULES}", **kwargs)
 
     @property
     def state(self) -> IntakeState:
@@ -188,6 +215,65 @@ class IntakeStage(Agent):
             return {"ok": False, "reprompt": problems}
         self.state.apply(values)
         return {"ok": True}
+
+    @function_tool()
+    async def amend(
+        self,
+        context: RunContext,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        date_of_birth: str | None = None,
+        sex: str | None = None,
+        phone_number: str | None = None,
+        email: str | None = None,
+        address_line_1: str | None = None,
+        address_line_2: str | None = None,
+        city: str | None = None,
+        state: str | None = None,
+        zip_code: str | None = None,
+        insurance_provider: str | None = None,
+        insurance_member_id: str | None = None,
+        preferred_language: str | None = None,
+        emergency_contact_name: str | None = None,
+        emergency_contact_phone: str | None = None,
+    ) -> dict | None:
+        """Correct details the caller already gave earlier in the call, such as a misspelled
+        name. Pass only the fields that change."""
+        result = self._store_valid(
+            first_name=first_name,
+            last_name=last_name,
+            date_of_birth=date_of_birth,
+            sex=sex,
+            phone_number=phone_number,
+            email=email,
+            address_line_1=address_line_1,
+            address_line_2=address_line_2,
+            city=city,
+            state=state,
+            zip_code=zip_code,
+            insurance_provider=insurance_provider,
+            insurance_member_id=insurance_member_id,
+            preferred_language=preferred_language,
+            emergency_contact_name=emergency_contact_name,
+            emergency_contact_phone=emergency_contact_phone,
+        )
+        if not result["ok"]:
+            # Nothing is applied; the per-field reasons let the agent re-ask just those.
+            return result
+        return await self._after_amend()
+
+    async def _after_amend(self) -> dict | None:
+        """What happens after a successful correction. ReviewStage overrides this to read
+        everything back again."""
+        return {"ok": True}
+
+    @function_tool()
+    async def start_over(self, context: RunContext) -> Agent:
+        """Erase everything collected so far and restart from the caller's name. Only call
+        this when the caller clearly asks to start over."""
+        self.state.reset()
+        # No chat_ctx: the new stage starts with a clean history, so old answers can't leak in.
+        return IdentityStage()
 
 
 # --- 1. Welcome ------------------------------------------------------------
@@ -454,51 +540,7 @@ class ReviewStage(IntakeStage):
             )
         )
 
-    @function_tool()
-    async def amend(
-        self,
-        context: RunContext,
-        first_name: str | None = None,
-        last_name: str | None = None,
-        date_of_birth: str | None = None,
-        sex: str | None = None,
-        phone_number: str | None = None,
-        email: str | None = None,
-        address_line_1: str | None = None,
-        address_line_2: str | None = None,
-        city: str | None = None,
-        state: str | None = None,
-        zip_code: str | None = None,
-        insurance_provider: str | None = None,
-        insurance_member_id: str | None = None,
-        preferred_language: str | None = None,
-        emergency_contact_name: str | None = None,
-        emergency_contact_phone: str | None = None,
-    ) -> dict | None:
-        """Correct one or more already-collected fields before saving. Pass only the fields
-        that change."""
-        result = self._store_valid(
-            first_name=first_name,
-            last_name=last_name,
-            date_of_birth=date_of_birth,
-            sex=sex,
-            phone_number=phone_number,
-            email=email,
-            address_line_1=address_line_1,
-            address_line_2=address_line_2,
-            city=city,
-            state=state,
-            zip_code=zip_code,
-            insurance_provider=insurance_provider,
-            insurance_member_id=insurance_member_id,
-            preferred_language=preferred_language,
-            emergency_contact_name=emergency_contact_name,
-            emergency_contact_phone=emergency_contact_phone,
-        )
-        if not result["ok"]:
-            # Nothing is applied; the per-field reasons let the agent re-ask just those.
-            return result
-
+    async def _after_amend(self) -> None:
         # Same paced, line-by-line readback as on_enter (see the comment there) — a plain
         # dict return here would let the LLM paraphrase the correction into one run-on
         # sentence again, and returning None (rather than a dict) avoids the framework

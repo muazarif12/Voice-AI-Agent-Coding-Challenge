@@ -102,12 +102,22 @@ async def handle_call(ctx: JobContext) -> None:
         turns.append({"speaker": speaker, "text": item.text_content})
         log.info("conversation turn", extra={"speaker": speaker, "text": item.text_content})
 
-    # Runs however the call ends (the agent hangs up after saving, or the caller hangs up).
-    # A transcript is only stored when a patient record was saved, since that's what it's
-    # linked to; any other call is still in the logs.
-    async def _save_transcript() -> None:
-        patient_id = session.userdata.saved_patient_id
-        if patient_id is None or not turns:
+    # Runs however the call ends: the agent hangs up after saving, the caller hangs up, or the
+    # line drops. A transcript is only stored when a patient record was saved, since that's
+    # what it's linked to.
+    async def _on_call_end() -> None:
+        state = session.userdata
+        patient_id = state.saved_patient_id
+        if patient_id is None:
+            # Ended before a record was saved (e.g. the line dropped): log whatever was
+            # collected, so the details aren't lost silently. The turns are logged above too.
+            if state.collected():
+                log.warning(
+                    "call ended before the record was saved",
+                    extra={"patient": state.as_log_payload()},
+                )
+            return
+        if not turns:
             return
         try:
             with PatientStore.open() as store:
@@ -116,7 +126,7 @@ async def handle_call(ctx: JobContext) -> None:
         except Exception:
             log.exception("saving call transcript failed", extra={"patient_id": str(patient_id)})
 
-    ctx.add_shutdown_callback(_save_transcript)
+    ctx.add_shutdown_callback(_on_call_end)
 
     await ctx.connect()
 

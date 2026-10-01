@@ -6,7 +6,16 @@ These exercise the data assembly without a live LiveKit session (the stage tools
 
 import datetime as dt
 
-from app.flow import IntakeState, ReviewStage, _spoken_lines, _validate
+from app.flow import (
+    ContactStage,
+    ExtrasStage,
+    IdentityStage,
+    IntakeState,
+    ReviewStage,
+    WelcomeStage,
+    _spoken_lines,
+    _validate,
+)
 from app.schema import NewPatient, PatientChanges
 
 
@@ -79,3 +88,18 @@ def test_review_stage_can_end_the_call():
     # ends the call itself after a successful (or failed) save.
     tool_ids = {getattr(tool, "id", None) for tool in ReviewStage().tools}
     assert "end_call" in tool_ids
+
+
+def test_every_stage_can_correct_details_and_start_over():
+    # Corrections and restarts must work at any point in the call, not only at the review.
+    for stage in (WelcomeStage(), IdentityStage(), ContactStage(), ExtrasStage(), ReviewStage()):
+        names = {tool.info.name for tool in stage.tools if hasattr(tool, "info")}
+        assert {"amend", "start_over"} <= names, type(stage).__name__
+        assert "start_over" in stage.instructions  # shared rules are in every prompt
+
+
+def test_reset_clears_everything_for_start_over():
+    state = _full_state()
+    state.updating = True
+    state.reset()
+    assert state == IntakeState()
